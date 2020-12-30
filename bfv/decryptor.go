@@ -1,7 +1,7 @@
 package bfv
 
 import (
-	"github.com/ldsec/lattigo/ring"
+	"github.com/ldsec/lattigo/v2/ring"
 )
 
 // Decryptor is an interface for decryptors
@@ -17,59 +17,56 @@ type Decryptor interface {
 
 // decryptor is a structure used to decrypt ciphertexts. It stores the secret-key.
 type decryptor struct {
-	params     *Parameters
-	bfvContext *bfvContext
-	sk         *SecretKey
-	polypool   *ring.Poly
+	params   *Parameters
+	ringQ    *ring.Ring
+	sk       *SecretKey
+	polypool *ring.Poly
 }
 
 // NewDecryptor creates a new Decryptor from the parameters with the secret-key
 // given as input.
 func NewDecryptor(params *Parameters, sk *SecretKey) Decryptor {
-	if !params.isValid {
-		panic("cannot NewDecryptor: params not valid (check if they were generated properly)")
-	}
 
-	if sk.sk.GetDegree() != int(1<<params.LogN) {
-		panic("cannot NewDecryptor: secret_key degree must match context degree")
+	var ringQ *ring.Ring
+	var err error
+	if ringQ, err = ring.NewRing(params.N(), params.qi); err != nil {
+		panic(err)
 	}
-
-	ctx := newBFVContext(params)
 
 	return &decryptor{
-		params:     params.Copy(),
-		bfvContext: ctx,
-		sk:         sk,
-		polypool:   ctx.contextQ.NewPoly(),
+		params:   params.Copy(),
+		ringQ:    ringQ,
+		sk:       sk,
+		polypool: ringQ.NewPoly(),
 	}
 }
 
 func (decryptor *decryptor) DecryptNew(ciphertext *Ciphertext) *Plaintext {
-	plaintext := NewPlaintext(decryptor.params)
-
-	decryptor.Decrypt(ciphertext, plaintext)
-
-	return plaintext
+	p := NewPlaintext(decryptor.params)
+	decryptor.Decrypt(ciphertext, p)
+	return p
 }
 
-func (decryptor *decryptor) Decrypt(ciphertext *Ciphertext, plaintext *Plaintext) {
-	ringContext := decryptor.bfvContext.contextQ
+func (decryptor *decryptor) Decrypt(ciphertext *Ciphertext, p *Plaintext) {
 
-	ringContext.NTT(ciphertext.value[ciphertext.Degree()], plaintext.value)
+	ringQ := decryptor.ringQ
+	tmp := decryptor.polypool
+
+	ringQ.NTTLazy(ciphertext.value[ciphertext.Degree()], p.value)
 
 	for i := uint64(ciphertext.Degree()); i > 0; i-- {
-		ringContext.MulCoeffsMontgomery(plaintext.value, decryptor.sk.sk, plaintext.value)
-		ringContext.NTT(ciphertext.value[i-1], decryptor.polypool)
-		ringContext.Add(plaintext.value, decryptor.polypool, plaintext.value)
+		ringQ.MulCoeffsMontgomery(p.value, decryptor.sk.sk, p.value)
+		ringQ.NTTLazy(ciphertext.value[i-1], tmp)
+		ringQ.Add(p.value, tmp, p.value)
 
-		if i&7 == 7 {
-			ringContext.Reduce(plaintext.value, plaintext.value)
+		if i&3 == 3 {
+			ringQ.Reduce(p.value, p.value)
 		}
 	}
 
-	if (ciphertext.Degree())&7 != 7 {
-		ringContext.Reduce(plaintext.value, plaintext.value)
+	if (ciphertext.Degree())&3 != 3 {
+		ringQ.Reduce(p.value, p.value)
 	}
 
-	ringContext.InvNTT(plaintext.value, plaintext.value)
+	ringQ.InvNTT(p.value, p.value)
 }

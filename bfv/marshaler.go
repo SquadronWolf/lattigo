@@ -2,7 +2,8 @@ package bfv
 
 import (
 	"encoding/binary"
-	"github.com/ldsec/lattigo/ring"
+
+	"github.com/ldsec/lattigo/v2/ring"
 )
 
 // MarshalBinary encodes a Ciphertext in a byte slice.
@@ -11,13 +12,10 @@ func (ciphertext *Ciphertext) MarshalBinary() (data []byte, err error) {
 	data = make([]byte, ciphertext.GetDataLen(true))
 
 	data[0] = uint8(len(ciphertext.value))
-	if ciphertext.isNTT {
-		data[1] = 1
-	}
 
 	var pointer, inc uint64
 
-	pointer = 2
+	pointer = 1
 
 	for _, el := range ciphertext.value {
 
@@ -34,16 +32,12 @@ func (ciphertext *Ciphertext) MarshalBinary() (data []byte, err error) {
 // UnmarshalBinary decodes a previously marshaled Ciphertext in the target Ciphertext.
 func (ciphertext *Ciphertext) UnmarshalBinary(data []byte) (err error) {
 
-	ciphertext.bfvElement = new(bfvElement)
+	ciphertext.Element = new(Element)
 
 	ciphertext.value = make([]*ring.Poly, uint8(data[0]))
 
-	if uint8(data[1]) == 1 {
-		ciphertext.isNTT = true
-	}
-
 	var pointer, inc uint64
-	pointer = 2
+	pointer = 1
 
 	for i := range ciphertext.value {
 
@@ -62,7 +56,7 @@ func (ciphertext *Ciphertext) UnmarshalBinary(data []byte) (err error) {
 // GetDataLen returns the length in bytes of the target Ciphertext.
 func (ciphertext *Ciphertext) GetDataLen(WithMetaData bool) (dataLen uint64) {
 	if WithMetaData {
-		dataLen += 2
+		dataLen++
 	}
 
 	for _, el := range ciphertext.value {
@@ -347,6 +341,8 @@ func (rotationkey *RotationKeys) MarshalBinary() (data []byte, err error) {
 
 	pointer := uint64(0)
 
+	// [RotType] [RotAmount]
+	// [  0xFF ] [ 0xFFFFFF]
 	for _, i := range mappingColL {
 
 		binary.BigEndian.PutUint32(data[pointer:pointer+4], uint32(i))
@@ -358,6 +354,8 @@ func (rotationkey *RotationKeys) MarshalBinary() (data []byte, err error) {
 		}
 	}
 
+	// [RotType] [RotAmount]
+	// [  0xFF ] [ 0xFFFFFF]
 	for _, i := range mappingColR {
 
 		binary.BigEndian.PutUint32(data[pointer:pointer+4], uint32(i))
@@ -369,6 +367,8 @@ func (rotationkey *RotationKeys) MarshalBinary() (data []byte, err error) {
 		}
 	}
 
+	// [RotType] [RotAmount]
+	// [  0xFF ] [ 0xFFFFFF]
 	if rotationkey.evakeyRotRow != nil {
 
 		data[pointer] = uint8(RotationRow)

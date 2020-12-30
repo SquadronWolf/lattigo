@@ -1,23 +1,10 @@
 package ckks
 
 import (
-	"github.com/ldsec/lattigo/ring"
 	"math/big"
-	"math/cmplx"
-	"math/rand"
+
+	"github.com/ldsec/lattigo/v2/ring"
 )
-
-func exp2pi(x complex128) complex128 {
-	return cmplx.Exp(2 * 3.141592653589793 * complex(0, 1) * x)
-}
-
-func randomFloat(min, max float64) float64 {
-	return min + rand.Float64()*(max-min)
-}
-
-func randomComplex(min, max float64) complex128 {
-	return complex(randomFloat(min, max), randomFloat(min, max))
-}
 
 func scaleUpExact(value float64, n float64, q uint64) (res uint64) {
 
@@ -93,14 +80,45 @@ func scaleUpVecExact(values []float64, n float64, moduli []uint64, coeffs [][]ui
 			}
 		}
 	}
-
-	return
 }
 
-func modVec(values []*big.Int, q uint64, coeffs []uint64) {
+func scaleUpVecExactBigFloat(values []*big.Float, scale float64, moduli []uint64, coeffs [][]uint64) {
+
+	prec := uint64(values[0].Prec())
+
+	xFlo := ring.NewFloat(0, prec)
+	xInt := new(big.Int)
 	tmp := new(big.Int)
+
+	zero := ring.NewFloat(0, prec)
+
+	scaleFlo := ring.NewFloat(scale, prec)
+	half := ring.NewFloat(0.5, prec)
+
 	for i := range values {
-		coeffs[i] = tmp.Mod(values[i], ring.NewUint(q)).Uint64()
+
+		xFlo.Mul(scaleFlo, values[i])
+
+		if values[i].Cmp(zero) < 0 {
+			xFlo.Sub(xFlo, half)
+		} else {
+			xFlo.Add(xFlo, half)
+		}
+
+		xFlo.Int(xInt)
+
+		for j := range moduli {
+
+			Q := ring.NewUint(moduli[j])
+
+			tmp.Mod(xInt, Q)
+
+			if values[i].Cmp(zero) < 0 {
+				tmp.Add(tmp, Q)
+			}
+
+			coeffs[j][i] = tmp.Uint64()
+		}
 	}
 }
 
@@ -146,53 +164,28 @@ func GenSwitchkeysRescalingParams(Q, P []uint64) (params []uint64) {
 	return
 }
 
-// GenModuli generates the appropriate primes from the parameters using generateCKKSPrimes, such that all the primes are different.
-func GenModuli(params *Parameters) (Q []uint64, P []uint64) {
+func sliceBitReverseInPlaceComplex128(slice []complex128, N uint64) {
 
-	// Extracts all the different primes bit size and maps their number
-	primesbitlen := make(map[uint64]uint64)
-	for _, qi := range params.LogQi {
+	var bit, j uint64
 
-		primesbitlen[qi]++
+	for i := uint64(1); i < N; i++ {
 
-		if qi > 60 {
-			panic("cannot GenModuli: the provided LogQi must be smaller than 61")
+		bit = N >> 1
+
+		for j >= bit {
+			j -= bit
+			bit >>= 1
+		}
+
+		j += bit
+
+		if i < j {
+			slice[i], slice[j] = slice[j], slice[i]
 		}
 	}
-
-	for _, pj := range params.LogPi {
-
-		primesbitlen[pj]++
-
-		if pj > 60 {
-			panic("cannot GenModuli: the provided LogPi must be smaller than 61")
-		}
-	}
-
-	// For each bit-size, finds that many primes
-	primes := make(map[uint64][]uint64)
-	for key, value := range primesbitlen {
-		primes[key] = ring.GenerateNTTPrimes(key, params.LogN, value)
-	}
-
-	// Assigns the primes to the ckks moduli chain
-	Q = make([]uint64, len(params.LogQi))
-	for i, qi := range params.LogQi {
-		Q[i] = primes[qi][0]
-		primes[qi] = primes[qi][1:]
-	}
-
-	// Assigns the primes to the special primes list for the keys context
-	P = make([]uint64, len(params.LogPi))
-	for i, pj := range params.LogPi {
-		P[i] = primes[pj][0]
-		primes[pj] = primes[pj][1:]
-	}
-
-	return Q, P
 }
 
-func sliceBitReverseInPlaceComplex128(slice []complex128, N uint64) {
+func sliceBitReverseInPlaceRingComplex(slice []*ring.Complex, N uint64) {
 
 	var bit, j uint64
 
